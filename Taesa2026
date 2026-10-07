@@ -1,0 +1,72 @@
+
+create table if not exists public.vehicles (
+  id uuid primary key default gen_random_uuid(),
+  plate text not null unique,
+  model text not null,
+  year integer not null check (year between 1980 and 2100),
+  mileage numeric not null default 0 check (mileage >= 0),
+  status text not null default 'DisponÃ­vel' check (status in ('DisponÃ­vel', 'Em Rota', 'ManutenÃ§Ã£o')),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.maintenances (
+  id uuid primary key default gen_random_uuid(),
+  vehicle_id uuid not null references public.vehicles(id) on delete cascade,
+  date date not null,
+  description text not null,
+  cost numeric(12,2) not null default 0 check (cost >= 0),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.trips (
+  id uuid primary key default gen_random_uuid(),
+  vehicle_id uuid not null references public.vehicles(id) on delete cascade,
+  vehicle_plate text not null,
+  date date not null default current_date,
+  departure_at timestamptz not null default now(),
+  km_initial numeric not null check (km_initial >= 0),
+  km_final numeric check (km_final is null or km_final >= km_initial),
+  photo_before_url text,
+  photo_after_url text,
+  fuel_liters numeric(10,2) check (fuel_liters is null or fuel_liters >= 0),
+  driver_name text not null default 'Motorista',
+  notes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists maintenances_vehicle_id_idx on public.maintenances(vehicle_id);
+create index if not exists trips_vehicle_id_idx on public.trips(vehicle_id);
+create index if not exists trips_date_idx on public.trips(date desc);
+
+alter table public.vehicles enable row level security;
+alter table public.maintenances enable row level security;
+alter table public.trips enable row level security;
+
+-- O login atual Ã© local. Estas polÃ­ticas permitem a aplicaÃ§Ã£o anon funcionar nesta primeira versÃ£o.
+-- Em produÃ§Ã£o, troque por polÃ­ticas vinculadas a auth.uid() e perfis reais.
+drop policy if exists vehicles_public_access on public.vehicles;
+create policy vehicles_public_access on public.vehicles for all to anon, authenticated using (true) with check (true);
+drop policy if exists maintenances_public_access on public.maintenances;
+create policy maintenances_public_access on public.maintenances for all to anon, authenticated using (true) with check (true);
+drop policy if exists trips_public_access on public.trips;
+create policy trips_public_access on public.trips for all to anon, authenticated using (true) with check (true);
+
+insert into public.vehicles (plate, model, year, mileage, status)
+values
+  ('ABC-1D23', 'Fiat Fiorino', 2022, 45820, 'Em Rota'),
+  ('FTR-8A71', 'VW Saveiro', 2021, 62840, 'DisponÃ­vel'),
+  ('KLM-4E56', 'Renault Master', 2023, 21450, 'ManutenÃ§Ã£o'),
+  ('GHP-9B08', 'Chevrolet Onix', 2022, 38610, 'DisponÃ­vel'),
+  ('TRK-2C45', 'Ford Transit', 2020, 89210, 'Em Rota')
+on conflict (plate) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('trip-panels', 'trip-panels', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists trip_panels_public_read on storage.objects;
+create policy trip_panels_public_read on storage.objects for select to anon, authenticated using (bucket_id = 'trip-panels');
+drop policy if exists trip_panels_public_insert on storage.objects;
+create policy trip_panels_public_insert on storage.objects for insert to anon, authenticated with check (bucket_id = 'trip-panels');
+drop policy if exists trip_panels_public_update on storage.objects;
+create policy trip_panels_public_update on storage.objects for update to anon, authenticated using (bucket_id = 'trip-panels') with check (bucket_id = 'trip-panels');
